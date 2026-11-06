@@ -6,7 +6,23 @@ A step-by-step PyTorch project for **4× single-image super-resolution**, design
 
 ## Current status
 
-**Phase 1: initial environment setup.** This repository currently provides the Colab setup notebook, configuration, and environment utilities. Dataset processing, models, training, inference, and evaluation will be implemented in later phases. No trained weights or benchmark results are provided.
+**Phases 1–2: environment and data pipeline.** The repository provides Colab setup, DIV2K download/caching, fixed image-level splits, paired crop datasets, visualization, and batch checks. Models, training, inference, and evaluation will follow. No trained weights or benchmark results are provided.
+
+## Phase 2: prepare DIV2K
+
+[Open data preparation in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/02_data_preparation.ipynb).
+
+Run its cells in order. It updates an existing clean checkout with a fast-forward pull, mounts Drive, downloads the official training and validation HR archives, and saves a fixed split manifest. Local tracked edits cause the update to stop without discarding them.
+
+- Default smoke mode: 100 training images; set `SMOKE_MODE = False` for all 800.
+- Custom validation/test: 50/50 images from the official validation HR set, split before cropping. Our held-out test is not the official challenge test.
+- The smoke subset does **not** reduce archive download size. Budget several GB of downloads, approximately 12 GB free local space and 5 GB for the Drive archive cache. Download time depends on the server and connection.
+- HR crops are 96×96; LR crops are 24×24. Pillow bicubic creates LR from the matching HR crop. This differs from the official MATLAB degradation, so results are not directly comparable to the official leaderboard.
+- LR tensors use `[0, 1]`; HR tensors use `[-1, 1]`. Training crops are random; validation center crops are deterministic. Final full-image evaluation is deferred to phase 5.
+
+The notebook saves `splits/div2k_seed42.json`, `results/phase2_lr_bicubic_hr.png`, and `logs/phase2_data_settings.json` under the Drive project folder. Test images are not visualized or used for tuning. Data and preview outputs are excluded from Git.
+
+The [DIV2K dataset](https://data.vision.ee.ethz.ch/cvl/DIV2K/) is provided for academic research; image copyrights belong to their owners. The repository's code license does not license these images. Cite Agustsson and Timofte, *NTIRE 2017 Challenge on Single Image Super-Resolution: Dataset and Study*, and the relevant challenge report as requested by the dataset authors.
 
 ## Start in Colab
 
@@ -26,15 +42,20 @@ SRGAN-Image-Super-Resolution/
 ├── configs/
 │   └── srgan.yaml
 ├── notebooks/
-│   └── 01_setup_colab.ipynb
+│   ├── 01_setup_colab.ipynb
+│   └── 02_data_preparation.ipynb
 ├── src/
 │   ├── __init__.py
 │   ├── setup.py
+│   ├── data.py
+│   ├── dataset.py
 │   └── models/
 │       └── __init__.py
 ├── data/
 ├── checkpoints/
 ├── results/
+├── tests/
+│   └── test_data.py
 ├── requirements.txt
 ├── .gitignore
 ├── LICENSE
@@ -78,3 +99,8 @@ Ledig et al., [Photo-Realistic Single Image Super-Resolution Using a Generative 
 ## License
 
 See [LICENSE](LICENSE).
+
+## Offline data checks
+
+With NumPy and Pillow installed, run `python -m unittest discover -s tests -v`. These checks cover reproducible disjoint splits, aligned crops, safe expected-member extraction, and persisted manifest protection. They use synthetic images and do not download DIV2K. The notebook performs the real PyTorch tensor and batch checks in Colab.
+
