@@ -6,7 +6,7 @@ A step-by-step PyTorch project for **4× single-image super-resolution**, design
 
 ## Current status
 
-**Phases 1–3: environment, data, and model inspection.** The repository provides the Colab setup, DIV2K pipeline, generator and discriminator, shape checks, and untrained output visualization. Training, inference tooling, and evaluation will follow. No trained weights or benchmark results are provided.
+**Phases 1–4A: setup, data, models, and generator pretraining.** The repository includes a generator-only MSE training pilot with validation, resumable checkpoints, and comparisons. Adversarial training (4B), inference tooling, and final evaluation will follow. No trained weights or benchmark results are included in Git.
 
 ## Phase 2: prepare DIV2K
 
@@ -43,6 +43,22 @@ This is an SRGAN-style implementation rather than a claim of exact paper reprodu
 
 The notebook saves `results/phase3_untrained_generator.png` and `logs/phase3_model_inspection.json` on Drive. No weights are saved in phase 3.
 
+## Phase 4A: pretrain the generator
+
+[Open generator pretraining in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/04a_generator_pretraining.ipynb).
+
+The first pilot uses 100 training images, all 50 validation images, 20 total epochs, batch size 16, float32, Adam (lr 1e-4, betas 0.9/0.999), and MSE in [-1, 1]. Gradients are clipped to norm 1.0. The discriminator is not instantiated. One random crop per image per epoch gives only 140 optimizer steps; this is a learning/pipeline pilot, not a convergence claim or the paper's full schedule.
+
+Settings live in `configs/pretrain.yaml`. The notebook restores selected images from the Drive caches and uses a separate `checkpoints/<run_name>_smoke100/` or `checkpoints/<run_name>_full800/` directory. Changes to the data subset, learning rate, seed, or batch size require a separate run name. Increasing `epochs` extends the same run to a new **total** epoch target.
+
+At each completed epoch, `last.pt` stores the latest generator, Adam state, history, experiment identity, and the best validation generator weights. A temporary sibling is written before replacement. On resume, model/optimizer settings are checked; partial epochs are repeated. Epoch-based random seeds and zero loader workers support crop/shuffle replay on the same environment. Exact equivalence across hardware or PyTorch versions is not guaranteed. Allow Drive writes to finish before disconnecting.
+
+`last.pt` is authoritative. `best_generator.pt` is a derived weights-only export regenerated when the training function finishes, including a no-op resumed run. If an interrupted run has no export yet, the best weights remain available inside `last.pt` under `best_model`. If no trained epoch improves validation MSE, epoch 0 remains the best and is explicitly reported.
+
+Results under `results/<run_id>/` include learning curves, LR/bicubic/untrained/best/HR comparisons, and a JSON report. Validation PSNR is mean per-image **RGB** PSNR on fixed 96x96 center crops with no border shaving; MSE is mapped from [-1, 1] to [0, 1] for this metric, with a 1e-12 error floor. These are pilot metrics, not official benchmark scores. Held-out test images are never loaded.
+
+Inspect the curves and visual results before moving to a longer run or adversarial phase 4B.
+
 ## Start in Colab
 
 1. Open the setup notebook using the badge above.
@@ -59,16 +75,19 @@ Colab supplies PyTorch and torchvision. `requirements.txt` installs supporting l
 ```text
 SRGAN-Image-Super-Resolution/
 ├── configs/
-│   └── srgan.yaml
+│   ├── srgan.yaml
+│   └── pretrain.yaml
 ├── notebooks/
 │   ├── 01_setup_colab.ipynb
 │   ├── 02_data_preparation.ipynb
-│   └── 03_model_architecture.ipynb
+│   ├── 03_model_architecture.ipynb
+│   └── 04a_generator_pretraining.ipynb
 ├── src/
 │   ├── __init__.py
 │   ├── setup.py
 │   ├── data.py
 │   ├── dataset.py
+│   ├── pretrain.py
 │   └── models/
 │       ├── __init__.py
 │       ├── generator.py
@@ -78,7 +97,8 @@ SRGAN-Image-Super-Resolution/
 ├── results/
 ├── tests/
 │   ├── test_data.py
-│   └── test_models.py
+│   ├── test_models.py
+│   └── test_pretrain.py
 ├── requirements.txt
 ├── .gitignore
 ├── LICENSE
@@ -95,7 +115,7 @@ Files for later phases are added when implemented, so the repository does not co
 | Colab `/content` | Working checkout and datasets | Lost when runtime storage resets |
 | Drive `MyDrive/SRGAN-Image-Super-Resolution/` | `checkpoints/`, `results/`, `logs/` | Persists between runtimes |
 
-The setup notebook verifies Drive writes and records environment versions and the Git commit. Checkpoint saving and training resume will be added with training. Data, weights, results, and local secrets are excluded from Git.
+The setup notebook verifies Drive writes and records environment versions and the Git commit. Generator pretraining now saves epoch-boundary checkpoints with Adam state and resumes from them. Data, weights, results, and local secrets are excluded from Git.
 
 ## Roadmap
 
@@ -131,3 +151,7 @@ With NumPy and Pillow installed, run `python -m unittest discover -s tests -v`. 
 ## Model integration checks
 
 With a matching PyTorch installation plus NumPy and Pillow, run `python -m unittest discover -s tests -v`. Model checks exercise the default 16-image generator batch, non-square input, data-to-model ranges/shapes, discriminator/generator gradient isolation, and generator weight serialization. These are CPU checks; Colab verifies the GPU path.
+
+## Pretraining checks
+
+The unittest suite also checks the metric range conversion, parameter/BatchNorm updates on the real generator, and uninterrupted versus epoch-boundary-resumed training on synthetic random data. It checks optimizer/history restoration, best-weight export, no-op resume, and rejection of incompatible settings. No DIV2K download is required for these CPU checks.

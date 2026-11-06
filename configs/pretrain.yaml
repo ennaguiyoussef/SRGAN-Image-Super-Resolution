@@ -1,0 +1,10 @@
+# First pilot run; this is not a converged SRGAN training schedule.
+smoke_mode: true
+epochs: 20
+learning_rate: 0.0001
+batch_size: 16
+gradient_clip_norm: 1.0
+# Zero workers gives deterministic epoch-boundary crop/shuffle replay.
+num_workers: 0
+run_name: pretrain_smoke_v1
+resume: true
