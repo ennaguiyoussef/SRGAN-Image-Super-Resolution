@@ -1,0 +1,7 @@
+# Initial experiment settings. Training is implemented in later phases.
+project_name: SRGAN-Image-Super-Resolution
+seed: 42
+scale_factor: 4
+hr_crop_size: 96
+batch_size: 16
+num_workers: 2
