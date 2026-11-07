@@ -1,0 +1,10 @@
+# Expand to all 800 training images, initialized from the smoke run's best weights.
+smoke_mode: false
+epochs: 20
+learning_rate: 0.0001
+batch_size: 16
+gradient_clip_norm: 1.0
+num_workers: 0
+run_name: pretrain_full_v1
+source_run: pretrain_smoke_v1_smoke100
+resume: true

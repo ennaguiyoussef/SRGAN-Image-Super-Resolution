@@ -1,4 +1,6 @@
 """Generator-only MSE pretraining with resumable epoch-boundary checkpoints."""
+import hashlib
+import io
 import json
 import math
 import random
@@ -68,16 +70,49 @@ def validate(model, loader, device):
     return {"val_mse": mse_sum / count, "val_psnr_rgb": psnr_sum / count}
 
 
+def initialize_from_checkpoint(model, checkpoint, experiment=None):
+    """Load trained best generator weights, without transferring Adam or epochs."""
+    checkpoint = Path(checkpoint)
+    payload = checkpoint.read_bytes()
+    source = torch.load(io.BytesIO(payload), map_location="cpu", weights_only=True)
+    if source.get("format_version") != 1 or "best_model" not in source:
+        raise ValueError("Source must be a phase-4A last.pt checkpoint.")
+    if source.get("best_epoch", 0) < 1:
+        raise ValueError("Source best weights are still epoch 0; inspect the source run first.")
+    source_experiment = source.get("settings", {}).get("experiment", {})
+    target_experiment = experiment or {}
+    for key in ("scale_factor", "hr_crop_size", "manifest_sha256", "validation_names",
+                "degradation", "lr_range", "hr_range"):
+        if key in target_experiment and source_experiment.get(key) != target_experiment[key]:
+            raise ValueError(f"Warm-start source has a different {key}.")
+    if "train_names" in target_experiment:
+        if not set(source_experiment.get("train_names", [])) <= set(target_experiment["train_names"]):
+            raise ValueError("Source training images are not contained in the target training set.")
+    model.load_state_dict(source["best_model"], strict=True)
+    return {
+        "kind": "best_generator_weights_only", "source_checkpoint": str(checkpoint),
+        "source_sha256": hashlib.sha256(payload).hexdigest(),
+        "source_best_epoch": source["best_epoch"],
+        "source_completed_epoch": source["epoch"],
+        "source_best_val_mse": source["best_val_mse"],
+        "source_commit": source.get("last_source_commit", source.get("source_commit", "")),
+        "optimizer_reset": True,
+    }
+
+
 def fit_pretrain(model, train_dataset, validation_dataset, run_dir, epochs,
                  batch_size=16, learning_rate=1e-4, seed=42,
                  gradient_clip_norm=1.0, device="cpu", resume=True,
-                 experiment=None, source_commit="", show_progress=True):
+                 experiment=None, source_commit="", show_progress=True,
+                 initial_checkpoint=None):
     """Train to a total epoch target, preserving model, Adam, history, and best weights.
 
     Each epoch reseeds Python/NumPy/Torch and its shuffle generator from seed+epoch.
     With num_workers=0 this replays crop/shuffle randomness after an epoch-boundary
     resume. An interrupted partial epoch is repeated from the last saved boundary.
     Exact equivalence across devices or software versions is not guaranteed.
+    initial_checkpoint warm-starts a new run from best generator weights only.
+    An existing destination last.pt takes priority and does not need the source file.
     """
     if type(epochs) is not int or epochs < 1 or type(batch_size) is not int or batch_size < 1:
         raise ValueError("epochs and batch_size must be positive integers.")
@@ -102,6 +137,8 @@ def fit_pretrain(model, train_dataset, validation_dataset, run_dir, epochs,
         "state_shapes": {k: list(v.shape) for k, v in model.state_dict().items()},
         "train_images": len(train_dataset), "validation_images": len(validation_dataset),
     }
+    if initial_checkpoint is not None:
+        settings["initial_checkpoint"] = str(Path(initial_checkpoint))
     validation_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     criterion = nn.MSELoss()
     if checkpoint_path.exists():
@@ -118,9 +155,16 @@ def fit_pretrain(model, train_dataset, validation_dataset, run_dir, epochs,
             print("PyTorch version changed since checkpoint; exact numerical replay is not guaranteed.")
         print(f"Resuming after epoch {state['epoch']}; target total epochs: {epochs}")
     else:
+        initialization = {"kind": "fresh_model"}
+        if initial_checkpoint is not None:
+            if Path(initial_checkpoint).resolve() == checkpoint_path.resolve():
+                raise ValueError("Source and destination checkpoints must be different.")
+            initialization = initialize_from_checkpoint(model, initial_checkpoint, experiment)
+            print(f"Loaded source best weights from epoch {initialization['source_best_epoch']}; Adam starts fresh.")
         baseline = validate(model, validation_loader, device)
         state = {
             "format_version": 1, "epoch": 0, "settings": settings,
+            "initialization": initialization,
             "source_commit": source_commit, "torch_version": str(torch.__version__),
             "history": [{"epoch": 0, "train_mse": None, **baseline}],
             "best_val_mse": baseline["val_mse"], "best_epoch": 0,
@@ -128,7 +172,7 @@ def fit_pretrain(model, train_dataset, validation_dataset, run_dir, epochs,
         }
         state["model"], state["optimizer"] = cpu_weights(model), optimizer.state_dict()
         atomic_torch_save(state, checkpoint_path)
-        print(f"Untrained baseline: MSE={baseline['val_mse']:.6f}, RGB PSNR={baseline['val_psnr_rgb']:.2f} dB")
+        print(f"Initial baseline: MSE={baseline['val_mse']:.6f}, RGB PSNR={baseline['val_psnr_rgb']:.2f} dB")
     for epoch in range(state["epoch"] + 1, epochs + 1):
         started = time.perf_counter()
         epoch_seed = seed + epoch

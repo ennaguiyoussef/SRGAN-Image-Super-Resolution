@@ -59,6 +59,20 @@ Results under `results/<run_id>/` include learning curves, LR/bicubic/untrained/
 
 Inspect the curves and visual results before moving to a longer run or adversarial phase 4B.
 
+## Phase 4A: expand to all 800 training images
+
+[Open full-dataset pretraining in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/04a_full_dataset_pretraining.ipynb).
+
+Use this after completing the 100-epoch smoke run. It loads the source `checkpoints/pretrain_smoke_v1_smoke100/last.pt` from Drive and initializes from its **best generator weights**. The source file is never rewritten. BatchNorm running statistics transfer with the model; Adam moments and epoch count do not.
+
+The new run uses all 800 training images and the same 50 validation images, batch size 16, MSE, float32, and 20 full-data epochs by default. This adds 1,000 optimizer steps. Budget roughly 35–50 minutes on the previously observed T4, plus restoration of missing local images; use the printed first-epoch duration for a better estimate. These settings do not imply convergence or guarantee an improvement over bicubic.
+
+Settings are in `configs/pretrain_full.yaml`. Destination files are under `checkpoints/pretrain_full_v1_full800/`. Full-data epoch 0 measures the transferred baseline; epoch 1 begins the new experiment. A SHA-256 source fingerprint, source best/completed epochs, source validation MSE, and optimizer reset flag are stored in the new checkpoint. Manifest, validation identities, ranges, crop size, degradation, architecture, and source-train subset membership are checked before transfer.
+
+On rerun, the **destination checkpoint takes priority** and restores its own model, Adam, history, and best weights. It can resume without the source file. If the source is missing or no longer matches its original fingerprint, its image-preview column is omitted; the full run can still resume. Increasing `epochs` extends this run's total target. Other incompatible settings require a new run name.
+
+The full notebook preserves the existing smoke notebook and configuration. Results compare the source baseline, the best full-data generator, and bicubic on identical validation crops. Held-out test images remain unused. The code provides no adversarial training yet.
+
 ## Start in Colab
 
 1. Open the setup notebook using the badge above.
@@ -76,12 +90,14 @@ Colab supplies PyTorch and torchvision. `requirements.txt` installs supporting l
 SRGAN-Image-Super-Resolution/
 ├── configs/
 │   ├── srgan.yaml
-│   └── pretrain.yaml
+│   ├── pretrain.yaml
+│   └── pretrain_full.yaml
 ├── notebooks/
 │   ├── 01_setup_colab.ipynb
 │   ├── 02_data_preparation.ipynb
 │   ├── 03_model_architecture.ipynb
-│   └── 04a_generator_pretraining.ipynb
+│   ├── 04a_generator_pretraining.ipynb
+│   └── 04a_full_dataset_pretraining.ipynb
 ├── src/
 │   ├── __init__.py
 │   ├── setup.py
@@ -98,7 +114,8 @@ SRGAN-Image-Super-Resolution/
 ├── tests/
 │   ├── test_data.py
 │   ├── test_models.py
-│   └── test_pretrain.py
+│   ├── test_pretrain.py
+│   └── test_warm_start.py
 ├── requirements.txt
 ├── .gitignore
 ├── LICENSE
@@ -155,3 +172,5 @@ With a matching PyTorch installation plus NumPy and Pillow, run `python -m unitt
 ## Pretraining checks
 
 The unittest suite also checks the metric range conversion, parameter/BatchNorm updates on the real generator, and uninterrupted versus epoch-boundary-resumed training on synthetic random data. It checks optimizer/history restoration, best-weight export, no-op resume, and rejection of incompatible settings. No DIV2K download is required for these CPU checks.
+
+Warm-start tests additionally verify exact best-weight transfer, source checkpoint immutability, reset Adam step counters, provenance recording, manifest compatibility, and destination resume when the source has been moved.
