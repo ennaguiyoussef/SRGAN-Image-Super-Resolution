@@ -1,0 +1,12 @@
+epochs: 3
+batch_size: 8
+generator_lr: 0.00005
+discriminator_lr: 0.0001
+gradient_clip_norm: 1.0
+loss_weights:
+  pixel: 1.0
+  feature: 0.01
+  adversarial: 0.001
+run_name: adversarial_full_v1
+source_run: pretrain_full_v1_full800
+resume: true

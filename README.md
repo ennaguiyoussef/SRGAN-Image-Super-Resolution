@@ -6,7 +6,7 @@ A step-by-step PyTorch project for **4× single-image super-resolution**, design
 
 ## Current status
 
-**Phases 1–4A: setup, data, models, and generator pretraining.** The repository includes a generator-only MSE training pilot with validation, resumable checkpoints, and comparisons. Adversarial training (4B), inference tooling, and final evaluation will follow. No trained weights or benchmark results are included in Git.
+**Phases 1–4B: setup, data, models, pretraining, and adversarial fine-tuning.** Both training stages have resumable checkpoints and validation previews. Phase 5 covers inference and final evaluation.
 
 ## Phase 2: prepare DIV2K
 
@@ -71,7 +71,17 @@ Settings are in `configs/pretrain_full.yaml`. Destination files are under `check
 
 On rerun, the **destination checkpoint takes priority** and restores its own model, Adam, history, and best weights. It can resume without the source file. If the source is missing or no longer matches its original fingerprint, its image-preview column is omitted; the full run can still resume. Increasing `epochs` extends this run's total target. Other incompatible settings require a new run name.
 
-The full notebook preserves the existing smoke notebook and configuration. Results compare the source baseline, the best full-data generator, and bicubic on identical validation crops. Held-out test images remain unused. The code provides no adversarial training yet.
+The full notebook preserves the existing smoke notebook and configuration. Results compare the source baseline, the best full-data generator, and bicubic on identical validation crops. Held-out test images remain unused. Phase 4B uses the full-data best weights to start a separate GAN experiment.
+
+## Phase 4B: adversarial fine-tuning
+
+[Open adversarial training in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/04b_adversarial_training.ipynb).
+
+The default pilot starts from the best generator in the full-data phase 4A checkpoint, with a fresh discriminator and two Adam optimizers. It runs three epochs over 800 training images, batch size 8, in float32. Settings are in `configs/adversarial.yaml`.
+
+Each batch updates D on real HR and detached SR, then updates G through D with D parameters and BatchNorm statistics frozen. G's objective uses pixel MSE (1.0), VGG19 feature MSE (0.01), and adversarial BCE (0.001). The feature extractor uses pretrained ImageNet VGG19 through relu2_2 with RGB normalization at native crop size. The first run caches approximately 548 MB of weights under the Drive project folder. The additional pixel term and the loss weights define this pilot's objective.
+
+The GAN run has its own `last.pt` with G, D, both optimizers, source provenance, and metrics. Resume starts from the last completed epoch. The weights export `best_gan_generator.pt` selects the trained GAN epoch with the lowest MSE on the 50 validation crops. The report compares that epoch, the phase 4A baseline, and bicubic. The held-out test split is reserved for phase 5.
 
 ## Start in Colab
 
@@ -91,19 +101,22 @@ SRGAN-Image-Super-Resolution/
 ├── configs/
 │   ├── srgan.yaml
 │   ├── pretrain.yaml
-│   └── pretrain_full.yaml
+│   ├── pretrain_full.yaml
+│   └── adversarial.yaml
 ├── notebooks/
 │   ├── 01_setup_colab.ipynb
 │   ├── 02_data_preparation.ipynb
 │   ├── 03_model_architecture.ipynb
 │   ├── 04a_generator_pretraining.ipynb
-│   └── 04a_full_dataset_pretraining.ipynb
+│   ├── 04a_full_dataset_pretraining.ipynb
+│   └── 04b_adversarial_training.ipynb
 ├── src/
 │   ├── __init__.py
 │   ├── setup.py
 │   ├── data.py
 │   ├── dataset.py
 │   ├── pretrain.py
+│   ├── adversarial.py
 │   └── models/
 │       ├── __init__.py
 │       ├── generator.py
@@ -115,7 +128,8 @@ SRGAN-Image-Super-Resolution/
 │   ├── test_data.py
 │   ├── test_models.py
 │   ├── test_pretrain.py
-│   └── test_warm_start.py
+│   ├── test_warm_start.py
+│   └── test_adversarial.py
 ├── requirements.txt
 ├── .gitignore
 ├── LICENSE
