@@ -6,7 +6,7 @@ A step-by-step PyTorch project for **4× single-image super-resolution**, design
 
 ## Current status
 
-**Phases 1–4B: setup, data, models, pretraining, and adversarial fine-tuning.** Both training stages have resumable checkpoints and validation previews. Phase 5 covers inference and final evaluation.
+**Phases 1–5 cover setup, data, models, training, inference, and final evaluation.** Run the Colab notebooks with the Drive artifacts from the earlier phases.
 
 ## Phase 2: prepare DIV2K
 
@@ -83,6 +83,16 @@ Each batch updates D on real HR and detached SR, then updates G through D with D
 
 The GAN run has its own `last.pt` with G, D, both optimizers, source provenance, and metrics. Resume starts from the last completed epoch. The weights export `best_gan_generator.pt` selects the trained GAN epoch with the lowest MSE on the 50 validation crops. The report compares that epoch, the phase 4A baseline, and bicubic. The held-out test split is reserved for phase 5.
 
+## Phase 5 — held-out evaluation and inference
+
+[Open final evaluation in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/05_final_evaluation.ipynb).
+
+The notebook loads the two weights exports and compares the generators with bicubic on the 50 held-out DIV2K images in the phase-2 manifest. It trims HR dimensions to multiples of four, downsamples full images with Pillow bicubic, and applies each method to the same LR pixels. The generator uses 192-pixel LR tiles and a 48-pixel halo. Tile cores are stitched after removing the halo.
+
+Scores use RGB pixels in [0, 1] with a four-pixel HR border shave. The report averages per-image PSNR and SSIM. SSIM uses a 7×7 uniform window and sample covariance. PSNR uses a 1e-12 MSE floor. This is the project's custom full-image protocol. Phase-4 validation scores used center crops.
+
+Drive outputs under `results/final_test_evaluation/` include `per_image_metrics.csv`, `summary_metrics.csv`, `test_report.json`, and `test_comparison.png`. The report records test IDs, checkpoint fingerprints, and metric settings. The final optional cell upscales an LR image from Drive using either generator.
+
 ## Start in Colab
 
 1. Open the setup notebook using the badge above.
@@ -109,7 +119,8 @@ SRGAN-Image-Super-Resolution/
 │   ├── 03_model_architecture.ipynb
 │   ├── 04a_generator_pretraining.ipynb
 │   ├── 04a_full_dataset_pretraining.ipynb
-│   └── 04b_adversarial_training.ipynb
+│   ├── 04b_adversarial_training.ipynb
+│   └── 05_final_evaluation.ipynb
 ├── src/
 │   ├── __init__.py
 │   ├── setup.py
@@ -117,6 +128,7 @@ SRGAN-Image-Super-Resolution/
 │   ├── dataset.py
 │   ├── pretrain.py
 │   ├── adversarial.py
+│   ├── evaluation.py
 │   └── models/
 │       ├── __init__.py
 │       ├── generator.py
@@ -129,7 +141,8 @@ SRGAN-Image-Super-Resolution/
 │   ├── test_models.py
 │   ├── test_pretrain.py
 │   ├── test_warm_start.py
-│   └── test_adversarial.py
+│   ├── test_adversarial.py
+│   └── test_evaluation.py
 ├── requirements.txt
 ├── .gitignore
 ├── LICENSE
