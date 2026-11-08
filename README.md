@@ -4,14 +4,14 @@ A PyTorch implementation of **4× single-image super-resolution** with a Streaml
 
 **Try the app:** import a PNG, JPEG, or WebP, select the methods to compare, then download each result as a PNG. A 64 × 64 input produces a 256 × 256 output.
 
-![Streamlit comparison of the 64 × 64 cat input, SRGAN ×4, and bicubic ×4](docs/images/streamlit-cat.webp)
+![Streamlit comparison of the 64 × 64 cat input, SRGAN ×4, and bicubic ×4](docs/images/streamlit-dog.webp)
 
 <details>
 <summary>More Streamlit examples</summary>
 
 **Photos, 64 × 64 → 256 × 256**
 
-![Golden retriever comparison](docs/images/streamlit-dog.webp)
+![Golden retriever comparison](docs/images/streamlit-cat.webp)
 
 ![Coffee cup comparison](docs/images/streamlit-coffee.webp)
 
