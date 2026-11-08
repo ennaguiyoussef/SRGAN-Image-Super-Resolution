@@ -93,6 +93,28 @@ Scores use RGB pixels in [0, 1] with a four-pixel HR border shave. The report av
 
 Drive outputs under `results/final_test_evaluation/` include `per_image_metrics.csv`, `summary_metrics.csv`, `test_report.json`, and `test_comparison.png`. The report records test IDs, checkpoint fingerprints, and metric settings. The final optional cell upscales an LR image from Drive using either generator.
 
+## Streamlit app
+
+Run the app locally from the repository root. It accepts a PNG, JPEG, or WebP image, displays the source beside any of the three ×4 renders, and exports each result as a PNG.
+
+### Run on Windows
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-app.txt
+.\.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+Download the generator weights from the project folder on Drive. Copy them into the matching local paths, or import them through **Poids des modèles** in the app.
+
+| Method | Weights file relative to the project folder |
+| --- | --- |
+| Pretrained generator (epoch 38) | `checkpoints/pretrain_full_continue_v1/best_generator.pt` |
+| Second SRGAN (epoch 3) | `checkpoints/adversarial_full_v2/best_gan_generator.pt` |
+| Bicubic | Available immediately |
+
+The app selects the pretrained generator by default when its local weights are available. Otherwise it starts with bicubic. With imported weights, choose the associated method in **Rendus à générer**. The input limit is one megapixel. Images are converted to RGB. The app uses CUDA when available and CPU otherwise.
+
 ## Start in Colab
 
 1. Open the setup notebook using the badge above.
