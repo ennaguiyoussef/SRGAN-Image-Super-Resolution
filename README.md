@@ -1,225 +1,109 @@
-# SRGAN — Image Super-Resolution
+# SRGAN Image Super-Resolution ×4
 
-A step-by-step PyTorch project for **4× single-image super-resolution**, designed for Google Colab GPU runtimes.
+A PyTorch implementation of **4× single-image super-resolution** with a Streamlit app for comparing bicubic interpolation, a generator pretrained with mean squared error (MSE), and adversarially fine-tuned SRGAN. The training notebooks run in Google Colab.
 
-[![Open setup in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/01_setup_colab.ipynb)
+**Try the app:** import a PNG, JPEG, or WebP, select the methods to compare, then download each result as a PNG. A 64 × 64 input produces a 256 × 256 output.
 
-## Current status
+![Streamlit comparison of the 64 × 64 cat input, SRGAN ×4, and bicubic ×4](docs/images/streamlit-cat.webp)
 
-**Phases 1–5 cover setup, data, models, training, inference, and final evaluation.** Run the Colab notebooks with the Drive artifacts from the earlier phases.
+<details>
+<summary>More Streamlit examples</summary>
 
-## Phase 2: prepare DIV2K
+**Photos, 64 × 64 → 256 × 256**
 
-[Open data preparation in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/02_data_preparation.ipynb).
+![Golden retriever comparison](docs/images/streamlit-dog.webp)
 
-Run its cells in order. It updates an existing clean checkout with a fast-forward pull, mounts Drive, downloads the official training and validation HR archives, and saves a fixed split manifest. Local tracked edits cause the update to stop without discarding them.
+![Coffee cup comparison](docs/images/streamlit-coffee.webp)
 
-- Default smoke mode: 100 training images; set `SMOKE_MODE = False` for all 800.
-- Custom validation/test: 50/50 images from the official validation HR set, split before cropping. Our held-out test is not the official challenge test.
-- The smoke subset does **not** reduce archive download size. Budget several GB of downloads, approximately 12 GB free local space and 5 GB for the Drive archive cache. Download time depends on the server and connection.
-- HR crops are 96×96; LR crops are 24×24. Pillow bicubic creates LR from the matching HR crop. This differs from the official MATLAB degradation, so results are not directly comparable to the official leaderboard.
-- LR tensors use `[0, 1]`; HR tensors use `[-1, 1]`. Training crops are random; validation center crops are deterministic. Final full-image evaluation is deferred to phase 5.
+**Icons, 12 × 12 → 48 × 48**
 
-The notebook saves `splits/div2k_seed42.json`, `results/phase2_lr_bicubic_hr.png`, and `logs/phase2_data_settings.json` under the Drive project folder. Test images are not visualized or used for tuning. Data and preview outputs are excluded from Git.
+![Bird icon comparison](docs/images/streamlit-bird.webp)
 
-The [DIV2K dataset](https://data.vision.ee.ethz.ch/cvl/DIV2K/) is provided for academic research; image copyrights belong to their owners. The repository's code license does not license these images. Cite Agustsson and Timofte, *NTIRE 2017 Challenge on Single Image Super-Resolution: Dataset and Study*, and the relevant challenge report as requested by the dataset authors.
+![Geometric shapes comparison](docs/images/streamlit-shapes.webp)
 
-## Phase 3: inspect the models
+![Glasses icon comparison](docs/images/streamlit-glasses.webp)
 
-[Open model architecture in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/03_model_architecture.ipynb).
+</details>
 
-Run the notebook after phase 2 with a GPU runtime. It traces a 16-image batch through the generator, checks discriminator outputs, restores validation images from the Drive cache when needed, and saves an untrained output comparison. No optimizer steps are performed.
+## Run the app locally
 
-| Model | Input | Output |
-| --- | --- | --- |
-| Generator | RGB LR `(N, 3, H, W)` in [0, 1] | RGB SR `(N, 3, 4H, 4W)` in [-1, 1] |
-| Discriminator | RGB HR or SR `(N, 3, 96, 96)` in [-1, 1] | Raw logits `(N, 1)` |
-
-The generator uses a 9x9 input convolution, 16 residual blocks (3x3 convolutions, batch normalization, and channel-wise PReLU), a long skip, two learned PixelShuffle x2 blocks, and a 9x9 RGB output convolution with Tanh. Both local residual additions and the long skip preserve feature information. The default PyTorch parameter initialization is used.
-
-The discriminator uses eight 3x3 convolution blocks (64 through 512 channels), LeakyReLU with slope 0.2, batch normalization after all but the first convolution, and a dense 1024-unit classifier. It is fixed to 96x96 crops; only the generator is used for future SR inference. It returns logits without sigmoid for future `BCEWithLogitsLoss`.
-
-This is an SRGAN-style implementation rather than a claim of exact paper reproduction. Explicit choices include channel-wise PReLU, Tanh RGB output, LR [0, 1] / HR [-1, 1], Pillow degradation, PyTorch defaults, and a raw-logit discriminator. An untrained generator can produce correct shapes without reconstructing useful details. Its initial discriminator scores have no useful quality interpretation.
-
-The notebook saves `results/phase3_untrained_generator.png` and `logs/phase3_model_inspection.json` on Drive. No weights are saved in phase 3.
-
-## Phase 4A: pretrain the generator
-
-[Open generator pretraining in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/04a_generator_pretraining.ipynb).
-
-The first pilot uses 100 training images, all 50 validation images, 20 total epochs, batch size 16, float32, Adam (lr 1e-4, betas 0.9/0.999), and MSE in [-1, 1]. Gradients are clipped to norm 1.0. The discriminator is not instantiated. One random crop per image per epoch gives only 140 optimizer steps; this is a learning/pipeline pilot, not a convergence claim or the paper's full schedule.
-
-Settings live in `configs/pretrain.yaml`. The notebook restores selected images from the Drive caches and uses a separate `checkpoints/<run_name>_smoke100/` or `checkpoints/<run_name>_full800/` directory. Changes to the data subset, learning rate, seed, or batch size require a separate run name. Increasing `epochs` extends the same run to a new **total** epoch target.
-
-At each completed epoch, `last.pt` stores the latest generator, Adam state, history, experiment identity, and the best validation generator weights. A temporary sibling is written before replacement. On resume, model/optimizer settings are checked; partial epochs are repeated. Epoch-based random seeds and zero loader workers support crop/shuffle replay on the same environment. Exact equivalence across hardware or PyTorch versions is not guaranteed. Allow Drive writes to finish before disconnecting.
-
-`last.pt` is authoritative. `best_generator.pt` is a derived weights-only export regenerated when the training function finishes, including a no-op resumed run. If an interrupted run has no export yet, the best weights remain available inside `last.pt` under `best_model`. If no trained epoch improves validation MSE, epoch 0 remains the best and is explicitly reported.
-
-Results under `results/<run_id>/` include learning curves, LR/bicubic/untrained/best/HR comparisons, and a JSON report. Validation PSNR is mean per-image **RGB** PSNR on fixed 96x96 center crops with no border shaving; MSE is mapped from [-1, 1] to [0, 1] for this metric, with a 1e-12 error floor. These are pilot metrics, not official benchmark scores. Held-out test images are never loaded.
-
-Inspect the curves and visual results before moving to a longer run or adversarial phase 4B.
-
-## Phase 4A: expand to all 800 training images
-
-[Open full-dataset pretraining in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/04a_full_dataset_pretraining.ipynb).
-
-Use this after completing the 100-epoch smoke run. It loads the source `checkpoints/pretrain_smoke_v1_smoke100/last.pt` from Drive and initializes from its **best generator weights**. The source file is never rewritten. BatchNorm running statistics transfer with the model; Adam moments and epoch count do not.
-
-The new run uses all 800 training images and the same 50 validation images, batch size 16, MSE, float32, and 20 full-data epochs by default. This adds 1,000 optimizer steps. Budget roughly 35–50 minutes on the previously observed T4, plus restoration of missing local images; use the printed first-epoch duration for a better estimate. These settings do not imply convergence or guarantee an improvement over bicubic.
-
-Settings are in `configs/pretrain_full.yaml`. Destination files are under `checkpoints/pretrain_full_v1_full800/`. Full-data epoch 0 measures the transferred baseline; epoch 1 begins the new experiment. A SHA-256 source fingerprint, source best/completed epochs, source validation MSE, and optimizer reset flag are stored in the new checkpoint. Manifest, validation identities, ranges, crop size, degradation, architecture, and source-train subset membership are checked before transfer.
-
-On rerun, the **destination checkpoint takes priority** and restores its own model, Adam, history, and best weights. It can resume without the source file. If the source is missing or no longer matches its original fingerprint, its image-preview column is omitted; the full run can still resume. Increasing `epochs` extends this run's total target. Other incompatible settings require a new run name.
-
-The full notebook preserves the existing smoke notebook and configuration. Results compare the source baseline, the best full-data generator, and bicubic on identical validation crops. Held-out test images remain unused. Phase 4B uses the full-data best weights to start a separate GAN experiment.
-
-## Phase 4B: adversarial fine-tuning
-
-[Open adversarial training in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/04b_adversarial_training.ipynb).
-
-The default pilot starts from the best generator in the full-data phase 4A checkpoint, with a fresh discriminator and two Adam optimizers. It runs three epochs over 800 training images, batch size 8, in float32. Settings are in `configs/adversarial.yaml`.
-
-Each batch updates D on real HR and detached SR, then updates G through D with D parameters and BatchNorm statistics frozen. G's objective uses pixel MSE (1.0), VGG19 feature MSE (0.01), and adversarial BCE (0.001). The feature extractor uses pretrained ImageNet VGG19 through relu2_2 with RGB normalization at native crop size. The first run caches approximately 548 MB of weights under the Drive project folder. The additional pixel term and the loss weights define this pilot's objective.
-
-The GAN run has its own `last.pt` with G, D, both optimizers, source provenance, and metrics. Resume starts from the last completed epoch. The weights export `best_gan_generator.pt` selects the trained GAN epoch with the lowest MSE on the 50 validation crops. The report compares that epoch, the phase 4A baseline, and bicubic. The held-out test split is reserved for phase 5.
-
-## Phase 5 — held-out evaluation and inference
-
-[Open final evaluation in Colab](https://colab.research.google.com/github/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/main/notebooks/05_final_evaluation.ipynb).
-
-The notebook loads the two weights exports and compares the generators with bicubic on the 50 held-out DIV2K images in the phase-2 manifest. It trims HR dimensions to multiples of four, downsamples full images with Pillow bicubic, and applies each method to the same LR pixels. The generator uses 192-pixel LR tiles and a 48-pixel halo. Tile cores are stitched after removing the halo.
-
-Scores use RGB pixels in [0, 1] with a four-pixel HR border shave. The report averages per-image PSNR and SSIM. SSIM uses a 7×7 uniform window and sample covariance. PSNR uses a 1e-12 MSE floor. This is the project's custom full-image protocol. Phase-4 validation scores used center crops.
-
-Drive outputs under `results/final_test_evaluation/` include `per_image_metrics.csv`, `summary_metrics.csv`, `test_report.json`, and `test_comparison.png`. The report records test IDs, checkpoint fingerprints, and metric settings. The final optional cell upscales an LR image from Drive using either generator.
-
-## Streamlit app
-
-Run the app locally from the repository root. It accepts a PNG, JPEG, or WebP image, displays the source beside any of the three ×4 renders, and exports each result as a PNG.
-
-### Run on Windows
+Install Python 3.11 and open PowerShell. Clone the repository and run these commands from the project folder.
 
 ```powershell
+git clone https://github.com/ennaguiyoussef/SRGAN-Image-Super-Resolution.git
+cd SRGAN-Image-Super-Resolution
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-app.txt
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-Download the generator weights from the project folder on Drive. Copy them into the matching local paths, or import them through **Poids des modèles** in the app.
+On Linux or macOS, use `python3 -m venv .venv` and `.venv/bin/python` for the last two commands. Open the local URL printed by Streamlit.
 
-| Method | Weights file relative to the project folder |
+Bicubic is available immediately. Download the two weight exports from the project folder on Drive. Import them under **Poids des modèles**, or copy them into the following paths relative to the project folder.
+
+| Method | Weight file |
 | --- | --- |
-| Pretrained generator (epoch 38) | `checkpoints/pretrain_full_continue_v1/best_generator.pt` |
-| Second SRGAN (epoch 3) | `checkpoints/adversarial_full_v2/best_gan_generator.pt` |
-| Bicubic | Available immediately |
+| Pretrained generator, best epoch 38 | `checkpoints/pretrain_full_continue_v1/best_generator.pt` |
+| Second SRGAN, best saved weights | `checkpoints/adversarial_full_v2/best_gan_generator.pt` |
 
-The app selects the pretrained generator by default when its local weights are available. Otherwise it starts with bicubic. With imported weights, choose the associated method in **Rendus à générer**. The input limit is one megapixel. Images are converted to RGB. The app uses CUDA when available and CPU otherwise.
+When the pretrained weights are installed locally, the app selects that generator by default. Choose the methods under **Rendus à générer**, click **Générer les rendus ×4**, then use **Télécharger le PNG** below a result. The app converts inputs to RGB, accepts images up to one megapixel, and uses CUDA when available or CPU otherwise.
 
-## Start in Colab
+## Results on 50 full test images
 
-1. Open the setup notebook using the badge above.
-2. Select **Runtime → Change runtime type → T4 GPU**.
-3. Run the cells in order and authorize Google Drive mounting.
-4. Confirm the final message: **Phase 1 complete: GPU, configuration, and persistent storage checks passed.**
+The experiments use **800 DIV2K training images** and a fixed project split of **50 validation and 50 test images** from the official validation archive. Both evaluations use the same test images and protocol. Full HR images are trimmed to multiples of four, reduced with Pillow bicubic, and reconstructed from the same LR input by each method. The reported scores average per-image RGB PSNR and SSIM with four HR border pixels removed on each side.
 
-The notebook clones the public repository into `/content/SRGAN-Image-Super-Resolution`. An existing checkout is preserved on reruns; it is not automatically pulled or reset. For updated code, use a fresh Colab runtime or deliberately update your checkout after saving local edits.
+| Evaluated model | Mean PSNR ↑ | Mean SSIM ↑ |
+| --- | ---: | ---: |
+| Bicubic ×4 | 26.491 dB | 0.76055 |
+| Original pretrained generator, epoch 18 | 26.072 dB | 0.74970 |
+| First GAN, epoch 3 | 25.920 dB | 0.73128 |
+| Continued pretrained generator, epoch 38 | **26.553 dB** | **0.76641** |
+| Second GAN, epoch 3 | 26.254 dB | 0.74091 |
 
-Colab supplies PyTorch and torchvision. `requirements.txt` installs supporting libraries without replacing that CUDA-compatible pair. Outside Colab, install a matching PyTorch/torchvision pair from the [official PyTorch installer](https://pytorch.org/get-started/locally/) first.
+The continued generator gained **0.062 dB PSNR** and **0.00586 SSIM** over bicubic on this split. The second GAN improved on the first GAN, while the continued MSE generator achieved the highest scores. The Streamlit examples illustrate how the GAN can sharpen some edges and introduce texture or color artifacts. The benchmark rows identify the evaluated checkpoints separately from these screenshots.
 
-## Project layout
+A later GAN continuation finished eight epochs and selected epoch 7 by validation MSE. Its validation PSNR was 25.12 dB. The test table records the three-epoch GAN exports evaluated in the notebooks below.
 
-```text
-SRGAN-Image-Super-Resolution/
-├── configs/
-│   ├── srgan.yaml
-│   ├── pretrain.yaml
-│   ├── pretrain_full.yaml
-│   └── adversarial.yaml
-├── notebooks/
-│   ├── 01_setup_colab.ipynb
-│   ├── 02_data_preparation.ipynb
-│   ├── 03_model_architecture.ipynb
-│   ├── 04a_generator_pretraining.ipynb
-│   ├── 04a_full_dataset_pretraining.ipynb
-│   ├── 04b_adversarial_training.ipynb
-│   └── 05_final_evaluation.ipynb
-├── src/
-│   ├── __init__.py
-│   ├── setup.py
-│   ├── data.py
-│   ├── dataset.py
-│   ├── pretrain.py
-│   ├── adversarial.py
-│   ├── evaluation.py
-│   └── models/
-│       ├── __init__.py
-│       ├── generator.py
-│       └── discriminator.py
-├── data/
-├── checkpoints/
-├── results/
-├── tests/
-│   ├── test_data.py
-│   ├── test_models.py
-│   ├── test_pretrain.py
-│   ├── test_warm_start.py
-│   ├── test_adversarial.py
-│   └── test_evaluation.py
-├── requirements.txt
-├── .gitignore
-├── LICENSE
-└── README.md
+[First executed evaluation](https://github.com/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/149dd93bc586862d2d2c43ec83e4544c738e5e29/notebooks/05_final_evaluation.ipynb) · [Updated executed evaluation](https://github.com/ennaguiyoussef/SRGAN-Image-Super-Resolution/blob/949d071e914a1930cf474cee9bb0648ad9ca2b45/notebooks/05_final_evaluation_updated.ipynb)
+
+## Training and evaluation notebooks
+
+Open the notebooks in Colab with a GPU runtime. They use the project folder on Drive for the data cache, split manifest, checkpoints, and reports. The initial training patches are 24 × 24 LR and 96 × 96 HR. The generator uses 16 residual blocks and two PixelShuffle ×2 stages.
+
+| Step | Notebook | What it does |
+| --- | --- | --- |
+| 1 | [Setup](notebooks/01_setup_colab.ipynb) | Check the runtime and Drive access. |
+| 2 | [Data preparation](notebooks/02_data_preparation.ipynb) | Download DIV2K, define the split, and inspect LR/HR crops. |
+| 3 | [Model architecture](notebooks/03_model_architecture.ipynb) | Trace generator shapes and inspect discriminator outputs. |
+| 4A | [Pretraining pilot](notebooks/04a_generator_pretraining.ipynb) | Train on 100 images and resume using the saved Adam state. |
+| 4A | [Full-dataset pretraining](notebooks/04a_full_dataset_pretraining.ipynb) | Transfer the pilot weights and train on all 800 images. |
+| 4A | [Continue pretraining](notebooks/04a_continue_pretraining.ipynb) | Resume from epoch 20 through epoch 40 and compare validation scores. |
+| 4B | [First GAN](notebooks/04b_adversarial_training.ipynb) · [Second GAN](notebooks/04b_adversarial_from_continued.ipynb) | Combine pixel, VGG19 feature, and adversarial losses with separate Adam optimizers. |
+| 5 | [Initial test](notebooks/05_final_evaluation.ipynb) · [Updated test](notebooks/05_final_evaluation_updated.ipynb) | Score full test images and export the per-image CSV, summary, JSON report, and visual comparisons. |
+
+Training saves `last.pt` for resuming model and optimizer state, and a separate weights export for inference. The final evaluation uses overlapping tiles to fit large images in memory. The updated test outputs are saved under `results/final_test_evaluation_v2/` on Drive.
+
+## Repository map
+
+| Path | Purpose |
+| --- | --- |
+| [app.py](app.py) | Streamlit image import, comparison, and download |
+| [src/models](src/models) | Generator and discriminator |
+| [src/pretrain.py](src/pretrain.py) · [src/adversarial.py](src/adversarial.py) | Training and checkpoint logic |
+| [src/evaluation.py](src/evaluation.py) | Tiled inference and image metrics |
+| [configs](configs) · [notebooks](notebooks) | Experiment settings and Colab workflows |
+| [tests](tests) | CPU checks for data, models, metrics, and resume behavior |
+
+Run the checks from the project folder after installing the dependencies.
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
-Files for later phases are added when implemented, so the repository does not contain empty training scripts.
+## References and credits
 
-## Storage
+- Christian Ledig et al., [Photo-Realistic Single Image Super-Resolution Using a Generative Adversarial Network](https://openaccess.thecvf.com/content_cvpr_2017/html/Ledig_Photo-Realistic_Single_Image_CVPR_2017_paper.html), CVPR 2017.
+- Eirikur Agustsson and Radu Timofte, [DIV2K dataset and NTIRE challenge](https://data.vision.ee.ethz.ch/cvl/DIV2K/). DIV2K is provided for academic research and has its own terms.
+- Demo images use the [Chelsea and coffee samples from scikit-image](https://scikit-image.org/docs/0.24.x/api/skimage.data.html), [Karen Arnold’s dog photo](https://commons.wikimedia.org/wiki/File:Golden-retriever-dog.jpg), and [Lucide icons](https://lucide.dev/license).
 
-| Location | Contents | Persistence |
-| --- | --- | --- |
-| GitHub | Source, configuration, notebooks, documentation | Versioned |
-| Colab `/content` | Working checkout and datasets | Lost when runtime storage resets |
-| Drive `MyDrive/SRGAN-Image-Super-Resolution/` | `checkpoints/`, `results/`, `logs/` | Persists between runtimes |
-
-The setup notebook verifies Drive writes and records environment versions and the Git commit. Generator pretraining now saves epoch-boundary checkpoints with Adam state and resumes from them. Data, weights, results, and local secrets are excluded from Git.
-
-## Roadmap
-
-1. **Environment:** verify GPU operations, configuration, and persistent storage.
-2. **Data:** choose a dataset, separate train/validation/test splits, generate bicubic LR images, and inspect paired crops.
-3. **Models:** implement and inspect the generator and discriminator.
-4. **Training:** pretrain the generator with pixel loss, then introduce perceptual and adversarial losses; implement checkpoints and resume.
-5. **Evaluation:** compare bicubic, pretrained generator, and SRGAN using visual examples, PSNR, and SSIM with a documented evaluation protocol.
-
-## Initial configuration
-
-- Scale: **4×**
-- HR training crop: **96 × 96**
-- Derived LR training crop: **24 × 24**
-- Initial batch size: **16**, to be validated against GPU memory during training
-- Seed: **42** (exact reproducibility across devices and software versions is not guaranteed)
-
-These patch sizes describe training crops, not a restriction to those image dimensions at inference. The setup does not download a dataset or start training.
-
-## Reference
-
-Ledig et al., [Photo-Realistic Single Image Super-Resolution Using a Generative Adversarial Network](https://arxiv.org/abs/1609.04802). Implementation details and deviations will be documented as models and losses are added.
-
-## License
-
-See [LICENSE](LICENSE).
-
-## Offline data checks
-
-With NumPy and Pillow installed, run `python -m unittest discover -s tests -v`. These checks cover reproducible disjoint splits, aligned crops, safe expected-member extraction, and persisted manifest protection. They use synthetic images and do not download DIV2K. The notebook performs the real PyTorch tensor and batch checks in Colab.
-
-
-## Model integration checks
-
-With a matching PyTorch installation plus NumPy and Pillow, run `python -m unittest discover -s tests -v`. Model checks exercise the default 16-image generator batch, non-square input, data-to-model ranges/shapes, discriminator/generator gradient isolation, and generator weight serialization. These are CPU checks; Colab verifies the GPU path.
-
-## Pretraining checks
-
-The unittest suite also checks the metric range conversion, parameter/BatchNorm updates on the real generator, and uninterrupted versus epoch-boundary-resumed training on synthetic random data. It checks optimizer/history restoration, best-weight export, no-op resume, and rejection of incompatible settings. No DIV2K download is required for these CPU checks.
-
-Warm-start tests additionally verify exact best-weight transfer, source checkpoint immutability, reset Adam step counters, provenance recording, manifest compatibility, and destination resume when the source has been moved.
+See [LICENSE](LICENSE) for the repository code license.
